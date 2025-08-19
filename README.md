@@ -29,3 +29,26 @@ git clone https://github.com/adarsh-gowda/RAG-Sprint-Challenge-.git
 cd RAG-Sprint-Challenge-
 ```
 
+### 2. Setup Environment
+```bash
+python -m venv .venv
+.venv\Scripts\activate     # Windows
+source .venv/bin/activate  # Linux/Mac
+```
+
+### 3. Install Dependencies
+```bash
+pip install -r requirements.txt
+
+```
+
+### 4. Add API Key
+```bash
+OPENAI_API_KEY=your_openai_api_key_here
+
+```
+### 5.Run script
+```bash
+python main.py
+
+```
