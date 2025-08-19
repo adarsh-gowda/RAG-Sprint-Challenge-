@@ -1,0 +1,29 @@
+# Web scraping
+requests==2.32.3
+beautifulsoup4==4.12.3
+lxml==5.2.2
+
+# Vector database
+faiss-cpu==1.8.0
+
+# Data handling
+numpy==1.26.4
+pickle-mixin==1.0.2
+pandas
+# Text splitting
+langchain==0.2.14
+
+# Google Gemini API
+google-generativeai==0.7.2
+langchain_google_genai
+
+openai 
+langchain 
+faiss-cpu 
+python-dotenv
+
+tiktoken
+langchain-openai
+
+langchain-google-genai 
+langchain-community
