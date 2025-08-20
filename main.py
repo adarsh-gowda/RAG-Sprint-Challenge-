@@ -173,11 +173,26 @@ def main():
     llm = ChatOpenAI(model_name="gpt-4", temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
 
     
-    for q in test_queries:
-        sub_queries, is_comp = decompose_query(q)
-        print("\nQuery:", q)
+    print("\n RAG Financial Analysis CLI")
+    print("Type your query below (or type 'exit' to quit)\n")
+
+    while True:
+        query = input(" Enter query: ").strip()
+        if query.lower() in ["exit", "quit", "q"]:
+            print("Exiting... ")
+            break
+
+        if not query:
+            continue
+
+        # Decompose query
+        sub_queries, is_comp = decompose_query(query)
+
+        # Get response
         response = retrieve_and_summarize(vectorstore, sub_queries, llm, is_comp)
-        print("Response:\n", response)
+        print("\n📢 Response:\n", response)
+        print("-" * 80)
+
 
 if __name__ == "__main__":
     main()
