@@ -2,6 +2,8 @@ import os
 import json
 from dotenv import load_dotenv
 from io import StringIO
+import pytesseract
+from PIL import Image
 # Load environment variables
 load_dotenv()
 
@@ -48,30 +50,38 @@ def load_documents(data_dir):
                     # --- Extract text ---
                     text = page.extract_text()
                     if text and text.strip():
-                        doc = Document(
+                        all_docs.append(Document(
                             page_content=text,
                             metadata={"source": filename, "page": i + 1, "type": "text"}
-                        )
-                        all_docs.append(doc)
+                        ))
 
                     # --- Extract tables ---
                     tables = page.extract_tables()
-                    for t_idx, table in enumerate(tables):
-                        try:
-                            # Convert each table to a string
-                            table_text = "\n".join(
-                                [" | ".join([str(cell) if cell else "" for cell in row]) for row in table]
-                            )
-                            if table_text.strip():
-                                doc = Document(
-                                    page_content=table_text,
-                                    metadata={"source": filename, "page": i + 1, "type": "table", "table_index": t_idx}
+                    if tables:
+                        for t_idx, table in enumerate(tables):
+                            try:
+                                table_text = "\n".join(
+                                    [" | ".join([str(cell).strip() if cell else "" for cell in row]) 
+                                     for row in table if any(row)]
                                 )
-                                all_docs.append(doc)
-                        except Exception as e:
-                            print(f"⚠️ Error parsing table on page {i+1} of {filename}: {e}")
+                                if table_text.strip():
+                                    all_docs.append(Document(
+                                        page_content=table_text,
+                                        metadata={"source": filename, "page": i + 1, "type": "table", "table_index": t_idx}
+                                    ))
+                            except Exception as e:
+                                print(f"⚠️ Error parsing table on page {i+1} of {filename}: {e}")
+                    else:
+                        # --- OCR fallback if no tables found ---
+                        im = page.to_image(resolution=300).original
+                        ocr_text = pytesseract.image_to_string(im)
+                        if ocr_text.strip():
+                            all_docs.append(Document(
+                                page_content=ocr_text,
+                                metadata={"source": filename, "page": i + 1, "type": "ocr"}
+                            ))
 
-            print(f"✅ Loaded {len(pdf.pages)} pages (with text + tables) from {filename}")
+            print(f"✅ Loaded {len(pdf.pages)} pages from {filename}")
 
         except Exception as e:
             print(f"❌ Error parsing {filename}: {e}")
