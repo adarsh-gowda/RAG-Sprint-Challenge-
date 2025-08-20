@@ -52,3 +52,13 @@ OPENAI_API_KEY=your_openai_api_key_here
 python main.py
 
 ```
+
+
+# Example test queries
+    test_queries = [
+        "What was NVIDIA's total revenue in fiscal year 2024?",
+        "What percentage of Google's 2023 revenue came from advertising?",
+        "How much did Microsoft's cloud revenue grow from 2022 to 2023?",
+        "Which of the three companies had the highest gross margin in 2023?",
+        "Compare the R&D spending as a percentage of revenue across all three companies in 2023",
+    ]
