@@ -1,198 +1,216 @@
 import os
 import json
+import pdfplumber
 from dotenv import load_dotenv
 
-# Load environment variables from .env
-load_dotenv()
-
-from langchain_community.embeddings import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_community.chat_models import ChatOpenAI
+import google.generativeai as genai
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import TextLoader
-from langchain_community.document_loaders import UnstructuredHTMLLoader, UnstructuredXMLLoader
-from langchain.schema import HumanMessage
-from bs4 import BeautifulSoup
-import pandas as pd
 from langchain.docstore.document import Document
 
-# -----------------------------
-# Inside retrieve_and_summarize()
-# -----------------------------
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+from langchain_chroma import Chroma
+from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
 
 # -----------------------------
 # CONFIG
 # -----------------------------
-DATA_DIR = "data"  # Folder containing txt versions of 10-Ks
-VECTOR_STORE_FILE = "faiss_index"
+DATA_DIR = "data1"          # folder with your 9 PDFs
+CHROMA_DB_DIR = "./chroma_store"
 
 # -----------------------------
-# LOAD DOCUMENTS AND CREATE VECTOR STORE
+# INIT GEMINI
 # -----------------------------
-def load_documents(data_dir):
-    """
-    Load HTML, XHTML, and XML SEC filings.
-    Extracts text + tables, converts tables into row-wise text for RAG.
-    Returns a list of LangChain Document objects.
-    """
-    all_docs = []
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
 
+# -----------------------------
+# LOAD PDFs (text + tables)
+# -----------------------------
+def load_pdfs(data_dir):
+    all_docs = {}
     for filename in os.listdir(data_dir):
         path = os.path.join(data_dir, filename)
-        if not os.path.isfile(path):
+        if not os.path.isfile(path) or not filename.lower().endswith(".pdf"):
             continue
 
-        chunks = []
+        docs = []
+        try:
+            with pdfplumber.open(path) as pdf:
+                for i, page in enumerate(pdf.pages):
+                    # --- Extract text ---
+                    text = page.extract_text()
+                    if text and text.strip():
+                        docs.append(
+                            Document(
+                                page_content=text,
+                                metadata={"source": filename, "page": i + 1, "type": "text"}
+                            )
+                        )
 
-        # HTML / XHTML files
-        if filename.lower().endswith((".html", ".htm", ".xhtml")):
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                soup = BeautifulSoup(f, "html.parser")
+                    # --- Extract tables ---
+                    tables = page.extract_tables()
+                    for t_idx, table in enumerate(tables):
+                        if table:
+                            table_text = "\n".join(
+                                [" | ".join([str(cell) if cell else "" for cell in row]) for row in table]
+                            )
+                            if table_text.strip():
+                                docs.append(
+                                    Document(
+                                        page_content=table_text,
+                                        metadata={"source": filename, "page": i + 1, "type": "table", "table_index": t_idx}
+                                    )
+                                )
 
-            # Extract main text
-            text = soup.get_text(separator="\n")
-            if text.strip():
-                chunks.append(text)
+            print(f"✅ Parsed {filename} ({len(pdf.pages)} pages)")
+            all_docs[filename] = docs
 
-            # Extract all tables
-            try:
-                tables = pd.read_html(str(soup))
-                for table in tables:
-                    for _, row in table.iterrows():
-                        row_text = " | ".join([f"{c}: {row[c]}" for c in table.columns])
-                        chunks.append(row_text)
-            except ValueError:
-                # No tables found
-                pass
+        except Exception as e:
+            print(f"❌ Error parsing {filename}: {e}")
 
-        # XML files (e.g., XBRL)
-        elif filename.lower().endswith(".xml"):
-            with open(path, "r", encoding="utf-8") as f:
-                soup = BeautifulSoup(f, "xml")
-            text = soup.get_text(separator="\n")
-            if text.strip():
-                chunks.append(text)
-
-        else:
-            print(f"Skipping unsupported file type: {filename}")
-            continue
-
-        # Convert chunks into LangChain Documents
-        for chunk in chunks:
-            doc = Document(page_content=chunk, metadata={"source": filename})
-            all_docs.append(doc)
-
-        print(f"Loaded {len(chunks)} chunks from {filename}")
-
-    print(f"Total documents loaded: {len(all_docs)}")
     return all_docs
 
-
-def create_vector_store(docs):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+# -----------------------------
+# CREATE / LOAD CHROMA STORES
+# -----------------------------
+def create_chroma_store(company_name, docs):
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
     chunks = splitter.split_documents(docs)
-    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
-    vectorstore = FAISS.from_documents(chunks, embeddings)
+
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001",
+        api_key=GEMINI_API_KEY
+    )
+
+    vectorstore = Chroma(
+        collection_name=f"financial_reports_{company_name}",
+        embedding_function=embeddings,
+        persist_directory=os.path.join(CHROMA_DB_DIR, company_name)  
+    )
+    vectorstore.add_documents(chunks)
     return vectorstore
 
+def preload_all_stores():
+    if not os.path.exists(CHROMA_DB_DIR):
+        os.makedirs(CHROMA_DB_DIR)
+
+    docs_dict = load_pdfs(DATA_DIR)
+    stores = {}
+
+    for company, docs in docs_dict.items():
+        print(f"📊 Creating/loading vector store for {company}...")
+
+        persist_path = os.path.join(CHROMA_DB_DIR, company)
+
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001",
+            api_key=GEMINI_API_KEY
+        )
+
+        # ✅ If DB already exists, just load it
+        if os.path.exists(persist_path) and os.listdir(persist_path):
+            vectorstore = Chroma(
+                collection_name=f"financial_reports_{company}",
+                embedding_function=embeddings,
+                persist_directory=persist_path
+            )
+        else:
+            # ✅ Otherwise, build it once
+            vectorstore = create_chroma_store(company, docs)
+
+        stores[company] = vectorstore
+
+    return stores
+
 # -----------------------------
-# PROMPT TEMPLATES
+# PROMPT TEMPLATE
 # -----------------------------
-comparative_prompt = PromptTemplate(
+analysis_prompt = PromptTemplate(
     input_variables=["company_data", "query"],
     template="""
-You are a financial analysis agent.
-You are given extracted text snippets for multiple companies: {company_data}
-Answer the following question by:
-1. Comparing the relevant metrics across companies.
-2. Returning a JSON with keys: query, answer, reasoning, sub_queries, sources each should seprate by new line.
-3. Sources must include company name, year, excerpt text, and page number if available.
+You are a financial analysis assistant. 
+Use ONLY the provided company data below:
+{company_data}
 
 Question: {query}
-Answer in JSON:
-"""
-)
 
-simple_prompt = PromptTemplate(
-    input_variables=["company_data", "query"],
-    template="""
-You are a financial analysis agent.
-Use the extracted text snippets {company_data} to:
-1. Answer the query {query}.
-2. If numbers for multiple years are present, calculate growth/percentage.
-3. Return JSON with keys: query, answer, reasoning, sub_queries, sources.
+Instructions:
+- Always provide an answer, even if only partial data is available.
+- If some companies are missing values, estimate or clarify based on available context.
+- Always return JSON strictly in this format:
+
+{{
+  "query": "<repeat the input query>",
+  "answer": "<direct clear answer, comparison if needed>",
+  "reasoning": "<explain how you derived answer step by step>",
+  "sub_queries": [
+      "<break query into smaller per-company sub-queries>"
+  ],
+  "sources": [
+    {{
+      "company": "<company ticker or name>",
+      "year": "<year if available>",
+      "excerpt": "<short excerpt from context>",
+      "page": <page number if available>
+    }}
+  ]
+}}
+
+Rules:
+- Do NOT say "answer not available".
+- Do NOT invent fake companies; only use those from the context.
+- If data is missing, still provide best effort answer from context.
+- Keep excerpts short (1-2 sentences max).
 """
 )
 
 # -----------------------------
-# AGENT LOGIC
+# RAG PIPELINE
 # -----------------------------
-def decompose_query(query):
-    """Detect if comparative query and generate sub-queries."""
-    comparative_keywords = ["compare", "highest", "change", "growth", "across all", "difference"]
-    companies = ["Microsoft", "Google", "NVIDIA"]
-    years = [str(y) for y in range(2022, 2025)]
+def retrieve_and_answer(stores, query):
+    all_results = []
 
-    if any(word in query.lower() for word in comparative_keywords):
-        sub_queries = []
-        for c in companies:
-            for y in years:
-                sub_queries.append(f"{c} {query} {y}")
-        return sub_queries, True
-    else:
-        return [query], False
-
-def retrieve_and_summarize(vectorstore, sub_queries, llm, is_comparative):
-    company_data = []
-    for sq in sub_queries:
-        results = vectorstore.similarity_search(sq, k=3)
+    # search across all companies (comparison possible)
+    for company, store in stores.items():
+        results = store.similarity_search(query, k=5)
         for r in results:
-            company_data.append({
-                "filename": r.metadata.get("source", ""),
-                "text": r.page_content[:500]
+            all_results.append({
+                "company": company,
+                "source": r.metadata.get("source", ""),
+                "page": r.metadata.get("page", ""),
+                "text": r.page_content[:400]
             })
-    prompt_template = comparative_prompt if is_comparative else simple_prompt
-    input_prompt = prompt_template.format(
-        company_data=json.dumps(company_data),
-        query=" / ".join(sub_queries)
+
+    # Build prompt
+    input_prompt = analysis_prompt.format(
+        company_data=json.dumps(all_results, indent=2),
+        query=query
     )
-     # Proper invocation with HumanMessage
-    answer = llm.invoke([HumanMessage(content=input_prompt)]).content
-    return answer
+
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    response = model.generate_content(input_prompt)
+
+    return response.text
 
 # -----------------------------
 # MAIN
 # -----------------------------
 def main():
-    print("Loading documents and creating vector store...")
-    docs = load_documents(DATA_DIR)
-    vectorstore = create_vector_store(docs)
-    llm = ChatOpenAI(model_name="gpt-4", temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
+    print("📊 Preloading all Chroma stores...")
+    stores = preload_all_stores()
 
-    
-    print("\n RAG Financial Analysis CLI")
-    print("Type your query below (or type 'exit' to quit)\n")
-
+    print("\n💬 Financial RAG CLI (Chroma + Gemini, multi-company ready)")
     while True:
-        query = input(" Enter query: ").strip()
-        if query.lower() in ["exit", "quit", "q"]:
-            print("Exiting... ")
+        query = input("🔎 Enter query (or 'exit'): ").strip()
+        if query.lower() in ["exit", "quit"]:
             break
-
         if not query:
             continue
 
-        # Decompose query
-        sub_queries, is_comp = decompose_query(query)
-
-        # Get response
-        response = retrieve_and_summarize(vectorstore, sub_queries, llm, is_comp)
-        print("\n📢 Response:\n", response)
+        answer = retrieve_and_answer(stores, query)
+        print("\n📌 Response:\n", answer)
         print("-" * 80)
-
 
 if __name__ == "__main__":
     main()

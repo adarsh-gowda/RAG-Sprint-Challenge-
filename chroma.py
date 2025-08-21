@@ -7,7 +7,7 @@ import google.generativeai as genai
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
-
+from langchain_openai import OpenAIEmbeddings
 # Use new Chroma package
 from langchain_chroma import Chroma
 from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
@@ -71,11 +71,11 @@ def load_pdfs(data_dir):
     print(f"\n📄 Total documents loaded: {len(docs)}")
     return docs
 
-# -----------------------------
+-----------------------------
 # CREATE / LOAD CHROMA
 # -----------------------------
 def create_chroma_store(docs):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
     chunks = splitter.split_documents(docs)
 
     embeddings = GoogleGenerativeAIEmbeddings(
@@ -109,6 +109,43 @@ def preload_chroma_store():
         docs = load_pdfs(DATA_DIR)
         return create_chroma_store(docs)
 
+
+
+# -----------------------------
+# CREATE / LOAD CHROMA
+# -----------------------------
+# def create_chroma_store(docs):
+#     splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=300)
+#     chunks = splitter.split_documents(docs)
+
+#     # Use OpenAI embeddings instead of Gemini
+#     embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+
+#     vectorstore = Chroma(
+#         collection_name="financial_reports",
+#         embedding_function=embeddings,
+#         persist_directory=CHROMA_DB_DIR
+#     )
+#     vectorstore.add_documents(chunks)
+#     vectorstore.persist()
+#     return vectorstore
+
+# def preload_chroma_store():
+#     embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+
+#     if os.path.exists(CHROMA_DB_DIR):
+#         print("✅ Loading existing Chroma store...")
+#         return Chroma(
+#             collection_name="financial_reports",
+#             embedding_function=embeddings,
+#             persist_directory=CHROMA_DB_DIR
+#         )
+#     else:
+#         print("⚠️ No Chroma DB found. Creating new one...")
+#         docs = load_pdfs(DATA_DIR)
+#         return create_chroma_store(docs)
+
+
 # -----------------------------
 # PROMPT TEMPLATE
 # -----------------------------
@@ -119,19 +156,13 @@ You are a financial analysis assistant.
 Use the extracted financial data: {company_data}
 Answer the question: {query}
 
-Rules:
-1. Always provide an answer, even if only partial or segment-level data is available.
-2. Clearly indicate if numbers are segment-specific and not totals.
-3. If totals or full data are missing, create sub-queries to retrieve missing pieces from the data.
-4. Explain your reasoning and highlight any assumptions made.
-5. Include sources with company, year, excerpt, and page if available.
+Return JSON with:
+- query
+- answer
+- reasoning
+- sources (company, year, excerpt, page if available)
 
-Return JSON with keys:
-- query: original query
-- sub_queries: list of sub-queries you used to infer or fill gaps
-- answer: your final answer
-- reasoning: detailed explanation of your approach
-- sources
+If only segment data is found (not total), clarify it.
 """
 )
 
