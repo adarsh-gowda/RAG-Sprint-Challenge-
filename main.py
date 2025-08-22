@@ -62,6 +62,7 @@ def load_pdfs(data_dir):
                                         metadata={"source": filename, "page": i + 1, "type": "table", "table_index": t_idx}
                                     )
                                 )
+                                
 
             print(f"✅ Parsed {filename} ({len(pdf.pages)} pages)")
             all_docs[filename] = docs
