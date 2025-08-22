@@ -53,7 +53,6 @@ python main.py
 
 ```
 
-
 # Example test queries
     test_queries = [
         "What was NVIDIA's total revenue in fiscal year 2024?",
