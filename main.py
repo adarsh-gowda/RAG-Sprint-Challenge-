@@ -14,7 +14,7 @@ from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
 # -----------------------------
 # CONFIG
 # -----------------------------
-DATA_DIR = "data1"          # folder with your 9 PDFs
+DATA_DIR = "data"          # folder with your 9 PDFs
 CHROMA_DB_DIR = "./chroma_store"
 
 # -----------------------------
