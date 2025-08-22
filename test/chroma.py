@@ -71,7 +71,7 @@ def load_pdfs(data_dir):
     print(f"\n📄 Total documents loaded: {len(docs)}")
     return docs
 
------------------------------
+# -----------------------------
 # CREATE / LOAD CHROMA
 # -----------------------------
 def create_chroma_store(docs):
